@@ -117,9 +117,14 @@ class Discriminator(nn.Module):
         )
         
         # Calculate the size after convolutions
-        # For 28x28: 28 -> 14 -> 7 -> 3 -> 1
-        # For 32x32: 32 -> 16 -> 8 -> 4 -> 2
-        ds_size = img_shape[1] // 2 ** 4
+        # After 4 conv layers with stride 2 and padding 1:
+        # For 28x28: 28 -> 14 -> 7 -> 4 -> 2 (final: 2x2)
+        # For 32x32: 32 -> 16 -> 8 -> 4 -> 2 (final: 2x2)
+        # Formula: output_size = floor((input_size + 2*padding - kernel) / stride) + 1
+        # With kernel=3, stride=2, padding=1: output = floor((input + 2 - 3) / 2) + 1 = floor((input - 1) / 2) + 1
+        ds_size = img_shape[1]
+        for _ in range(4):  # 4 conv layers
+            ds_size = (ds_size + 2 * 1 - 3) // 2 + 1
         
         # Output layer
         self.adv_layer = nn.Sequential(
