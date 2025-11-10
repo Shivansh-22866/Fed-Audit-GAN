@@ -121,16 +121,29 @@ class FairnessAuditor:
         n_samples = len(all_targets)
         
         if strategy == 'class_imbalance':
-            # Strategy 1: Split by class representation
+            # Strategy 1: ENHANCED - Split by class representation with percentile thresholds
             class_counts = torch.bincount(all_targets, minlength=self.num_classes)
-            median_count = torch.median(class_counts.float())
             
-            # Samples from underrepresented classes → disadvantaged (1)
-            # Samples from well-represented classes → advantaged (0)
-            sensitive_attrs = (class_counts[all_targets] < median_count).long()
+            # Use 40th percentile instead of median for more aggressive disadvantaged group
+            # This captures more underrepresented samples
+            sorted_counts = torch.sort(class_counts.float())[0]
+            threshold_idx = int(0.4 * len(sorted_counts))
+            threshold_count = sorted_counts[threshold_idx]
             
-            logger.info(f"Class imbalance sensitive attributes: "
-                       f"{sensitive_attrs.sum().item()}/{n_samples} disadvantaged")
+            # Samples from underrepresented classes (bottom 40%) → disadvantaged (1)
+            # Samples from well-represented classes (top 60%) → advantaged (0)
+            sensitive_attrs = (class_counts[all_targets] <= threshold_count).long()
+            
+            # Log distribution
+            class_dist = torch.bincount(all_targets[sensitive_attrs == 0])
+            disadv_dist = torch.bincount(all_targets[sensitive_attrs == 1])
+            
+            logger.info(f"ENHANCED Class imbalance sensitive attributes:")
+            logger.info(f"  Disadvantaged samples: {sensitive_attrs.sum().item()}/{n_samples} "
+                       f"({100*sensitive_attrs.sum().item()/n_samples:.1f}%)")
+            logger.info(f"  Threshold: {threshold_count:.0f} samples (40th percentile)")
+            logger.info(f"  Advantaged classes: {(class_counts > threshold_count).sum().item()} classes")
+            logger.info(f"  Disadvantaged classes: {(class_counts <= threshold_count).sum().item()} classes")
         
         elif strategy == 'uncertainty':
             # Strategy 2: Split by model uncertainty

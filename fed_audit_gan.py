@@ -202,8 +202,13 @@ def main():
         'test_accuracy': [],
         'fairness_scores': [],
         'accuracy_scores': [],
-        'bias_scores': []
+        'bias_scores': [],
+        'cumulative_fairness': []  # NEW: Track cumulative fairness trend
     }
+    
+    # NEW: Persistent sensitive attributes (created once, reused across rounds)
+    persistent_sensitive_attrs = None
+    persistent_probe_loader = None
     
     # =========================================================================
     # MAIN TRAINING LOOP
@@ -355,27 +360,46 @@ def main():
                     probe_dataset, batch_size=32, shuffle=False
                 )
             
-            # Create fairness auditor
-            auditor = FairnessAuditor(
-                num_classes=num_classes,
-                device=args.device
-            )
+            # FIX 1: Create PERSISTENT sensitive attributes only in Round 1
+            if persistent_sensitive_attrs is None:
+                print(f"\n🔧 FIX 1: Creating PERSISTENT sensitive attributes (Round 1 only)")
+                print(f"Strategy: {args.sensitive_attr_strategy}")
+                
+                # Create fairness auditor
+                auditor = FairnessAuditor(
+                    num_classes=num_classes,
+                    device=args.device
+                )
+                
+                # Set global model reference for uncertainty-based strategies
+                auditor.set_global_model(global_model)
+                
+                # Create persistent sensitive attributes
+                persistent_sensitive_attrs = auditor.create_sensitive_attributes_from_heterogeneity(
+                    dataloader=probe_loader,
+                    strategy=args.sensitive_attr_strategy
+                )
+                persistent_probe_loader = probe_loader
+                
+                print(f"✓ Persistent sensitive attributes created!")
+                print(f"  Disadvantaged samples: {persistent_sensitive_attrs.sum().item()} / {len(persistent_sensitive_attrs)}")
+                print(f"  These will be reused across ALL rounds for consistent fairness measurement")
+            else:
+                print(f"\n✓ Using persistent sensitive attributes from Round 1")
+                # Reuse existing auditor and sensitive attributes
+                auditor = FairnessAuditor(
+                    num_classes=num_classes,
+                    device=args.device
+                )
+                auditor.set_global_model(global_model)
+                probe_loader = persistent_probe_loader
+                sensitive_attrs = persistent_sensitive_attrs
             
-            # NEW: Set global model reference for uncertainty-based strategies
-            auditor.set_global_model(global_model)
-            
-            # NEW: Create proper sensitive attributes from data heterogeneity
-            print(f"Creating sensitive attributes using strategy: {args.sensitive_attr_strategy}")
-            sensitive_attrs = auditor.create_sensitive_attributes_from_heterogeneity(
-                dataloader=probe_loader,
-                strategy=args.sensitive_attr_strategy
-            )
-            
-            # Audit global model fairness with REAL sensitive attributes
+            # Audit global model fairness with PERSISTENT sensitive attributes
             fairness_metrics = auditor.audit_model(
                 model=global_model,
-                dataloader=probe_loader,
-                sensitive_attribute=sensitive_attrs  # Use real demographic groups!
+                dataloader=persistent_probe_loader,
+                sensitive_attribute=persistent_sensitive_attrs  # Use PERSISTENT attributes!
             )
             
             # Store baseline fairness metrics
@@ -423,11 +447,11 @@ def main():
                 client_acc = correct / total if total > 0 else 0.0
                 client_accuracies.append(client_acc)
                 
-                # Measure fairness on synthetic probes with REAL sensitive attributes
+                # Measure fairness on synthetic probes with PERSISTENT sensitive attributes
                 client_fairness = auditor.audit_model(
                     model=hypothetical_model,
-                    dataloader=probe_loader,
-                    sensitive_attribute=sensitive_attrs  # Use real demographic groups!
+                    dataloader=persistent_probe_loader,
+                    sensitive_attribute=persistent_sensitive_attrs  # Use PERSISTENT attributes!
                 )
                 client_fairness_metrics.append(client_fairness)
                 
@@ -456,11 +480,17 @@ def main():
             print(f"  → Accuracy weight (alpha): {alpha:.2f}")
             print(f"  → Fairness weight (beta):  {beta:.2f}")
             
+            # FIX 4: STRONGER JFI regularization (0.1 → 0.3)
+            jfi_regularization_weight = 0.3 if round_idx < 10 else 0.2  # Strong early, moderate later
+            
             scorer = FairnessContributionScorer(
                 alpha=alpha,
                 beta=beta,
-                jfi_weight=0.1  # NEW: 10% JFI regularization to prevent "rich get richer"
+                jfi_weight=jfi_regularization_weight  # ENHANCED: 30% penalty early rounds
             )
+            
+            print(f"  JFI Regularization Weight: {jfi_regularization_weight:.1f} "
+                  f"({'Strong' if jfi_regularization_weight >= 0.3 else 'Moderate'} enforcement)")
             
             final_weights = scorer.compute_combined_scores(
                 client_accuracies=client_accuracies,
@@ -481,6 +511,14 @@ def main():
             ])
             history['fairness_scores'].append(avg_fairness)
             history['accuracy_scores'].append(np.mean(client_accuracies))
+            
+            # FIX 3: Cumulative Fairness Tracking (smoothed trend)
+            if len(history['fairness_scores']) >= 3:
+                # Moving average of last 3 rounds
+                cumulative_fairness = np.mean(history['fairness_scores'][-3:])
+            else:
+                cumulative_fairness = avg_fairness
+            history['cumulative_fairness'].append(cumulative_fairness)
             
             # NEW: Compute JFI metrics for client-level fairness
             jfi_accuracy = compute_jains_fairness_index(client_accuracies)
@@ -504,9 +542,20 @@ def main():
             history['cv_accuracy'].append(cv_accuracy)
             history['cv_fairness'].append(cv_fairness)
             
+            # Compute fairness trend
+            if len(history['fairness_scores']) >= 2:
+                fairness_change = history['fairness_scores'][-1] - history['fairness_scores'][-2]
+                trend_symbol = "⬇️ IMPROVING" if fairness_change < 0 else "⬆️ DEGRADING"
+                cumulative_change = cumulative_fairness - history['fairness_scores'][0]
+                cumulative_trend = "⬇️ IMPROVING" if cumulative_change < 0 else "⬆️ DEGRADING"
+            else:
+                trend_symbol = "—"
+                cumulative_trend = "—"
+            
             print(f"✓ Phase 3 complete.")
             print(f"  Avg Client Accuracy: {np.mean(client_accuracies):.4f}")
-            print(f"  Avg Client Fairness: {avg_fairness:.4f}")
+            print(f"  Avg Client Fairness: {avg_fairness:.4f} {trend_symbol}")
+            print(f"  Cumulative Fairness (3-round avg): {cumulative_fairness:.4f} {cumulative_trend}")
             print(f"  JFI (Accuracy): {jfi_accuracy:.4f} [1.0=perfectly fair]")
             print(f"  JFI (Fairness): {jfi_fairness:.4f} [1.0=perfectly fair]")
             print(f"  CV (Accuracy): {cv_accuracy:.4f} [lower=more fair]")
@@ -564,6 +613,7 @@ def main():
                 log_dict.update({
                     'baseline_bias': baseline_bias,
                     'avg_fairness_score': history['fairness_scores'][-1],
+                    'cumulative_fairness': history['cumulative_fairness'][-1],  # NEW
                     'avg_accuracy_score': history['accuracy_scores'][-1],
                     'jfi_accuracy': history['jfi_accuracy'][-1],
                     'jfi_fairness': history['jfi_fairness'][-1],
