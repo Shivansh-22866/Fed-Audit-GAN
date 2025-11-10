@@ -17,18 +17,20 @@ echo.
 echo Select an experiment to run:
 echo.
 echo MNIST Quick Tests (2 rounds):
-echo   [1] MNIST - Standard FedAvg (quick test)
-echo   [2] MNIST - Fed-AuditGAN gamma=0.5 (quick test)
+echo   [1] MNIST - Standard FedAvg - quick test
+echo   [2] MNIST - Fed-AuditGAN gamma=0.5 - quick test
 echo.
-echo MNIST Full Experiments (50 rounds):
-echo   [3] MNIST - IID - Standard FedAvg
-echo   [4] MNIST - IID - Fed-AuditGAN (gamma=0.3, accuracy-focused)
-echo   [5] MNIST - IID - Fed-AuditGAN (gamma=0.5, balanced)
-echo   [6] MNIST - IID - Fed-AuditGAN (gamma=0.7, fairness-focused)
+echo MNIST Gamma Comparison (50 rounds with WandB):
+echo   [3] Run ALL gamma values - 0.0, 0.3, 0.5, 0.7, 1.0
+echo   [4] Gamma=0.0 - Pure Accuracy - NO fairness optimization
+echo   [5] Gamma=0.3 - Accuracy-Focused - 30% fairness, 70% accuracy
+echo   [6] Gamma=0.5 - Balanced - 50% fairness, 50% accuracy
+echo   [7] Gamma=0.7 - Fairness-Focused - 70% fairness, 30% accuracy
+echo   [8] Gamma=1.0 - Pure Fairness - 100% fairness optimization
 echo.
-echo CIFAR-10 Experiments:
-echo   [7] CIFAR-10 - IID - Standard FedAvg
-echo   [8] CIFAR-10 - IID - Fed-AuditGAN (balanced)
+echo Standard Experiments:
+echo   [9] MNIST - Standard FedAvg - No Fed-AuditGAN
+echo   [C] CIFAR-10 - Fed-AuditGAN - gamma=0.5 balanced
 echo.
 echo Other:
 echo   [Q] Quit
@@ -48,33 +50,84 @@ if /i "%choice%"=="2" (
     goto END
 )
 if /i "%choice%"=="3" (
-    echo Running MNIST - IID - Standard FedAvg - 50 rounds...
-    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --n_epochs 50 --exp_name "MNIST_IID_FedAvg"
+    echo.
+    echo ========================================================================
+    echo Running COMPLETE GAMMA COMPARISON STUDY
+    echo ========================================================================
+    echo This will run 5 experiments sequentially:
+    echo   1. Gamma=0.0 - Pure Accuracy
+    echo   2. Gamma=0.3 - Accuracy-Focused  
+    echo   3. Gamma=0.5 - Balanced
+    echo   4. Gamma=0.7 - Fairness-Focused
+    echo   5. Gamma=1.0 - Pure Fairness
+    echo.
+    echo Total time: ~5-10 hours
+    echo Results will be logged to WandB for comparison
+    echo.
+    pause
+    
+    echo.
+    echo [1/5] Running Gamma=0.0 - Pure Accuracy...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.0 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.0_PureAccuracy"
+    
+    echo.
+    echo [2/5] Running Gamma=0.3 - Accuracy-Focused...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.3 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.3_AccuracyFocused"
+    
+    echo.
+    echo [3/5] Running Gamma=0.5 - Balanced...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.5 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.5_Balanced"
+    
+    echo.
+    echo [4/5] Running Gamma=0.7 - Fairness-Focused...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.7 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.7_FairnessFocused"
+    
+    echo.
+    echo [5/5] Running Gamma=1.0 - Pure Fairness...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 1.0 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_1.0_PureFairness"
+    
+    echo.
+    echo ========================================================================
+    echo All 5 experiments complete!
+    echo Compare results on WandB to see gamma impact
+    echo ========================================================================
     goto END
 )
 if /i "%choice%"=="4" (
-    echo Running MNIST - IID - Fed-AuditGAN - gamma=0.3...
-    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.3 --n_epochs 50 --wandb --exp_name "MNIST_IID_AuditGAN_g03"
+    echo Running Gamma=0.0 - Pure Accuracy - NO fairness optimization...
+    echo This uses standard FedAvg with Fed-AuditGAN infrastructure but 100%% accuracy focus
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.0 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.0"
     goto END
 )
 if /i "%choice%"=="5" (
-    echo Running MNIST - IID - Fed-AuditGAN - gamma=0.5...
-    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.5 --n_epochs 50 --wandb --exp_name "MNIST_IID_AuditGAN_g05"
+    echo Running Gamma=0.3 - Accuracy-Focused - 30%% fairness, 70%% accuracy...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.3 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.3"
     goto END
 )
 if /i "%choice%"=="6" (
-    echo Running MNIST - IID - Fed-AuditGAN - gamma=0.7...
-    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.7 --n_epochs 50 --wandb --exp_name "MNIST_IID_AuditGAN_g07"
+    echo Running Gamma=0.5 - Balanced - 50%% fairness, 50%% accuracy...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.5 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.5"
     goto END
 )
 if /i "%choice%"=="7" (
-    echo Running CIFAR-10 - IID - Standard FedAvg...
-    "%PYTHON_PATH%" fed_audit_gan.py --dataset cifar10 --partition_mode iid --n_epochs 60 --exp_name "CIFAR10_IID_FedAvg"
+    echo Running Gamma=0.7 - Fairness-Focused - 70%% fairness, 30%% accuracy...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 0.7 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_0.7"
     goto END
 )
 if /i "%choice%"=="8" (
-    echo Running CIFAR-10 - IID - Fed-AuditGAN - balanced...
-    "%PYTHON_PATH%" fed_audit_gan.py --dataset cifar10 --partition_mode iid --use_audit_gan --gamma 0.5 --n_epochs 60 --wandb --exp_name "CIFAR10_IID_AuditGAN"
+    echo Running Gamma=1.0 - Pure Fairness - 100%% fairness optimization...
+    echo This maximizes fairness at the cost of some accuracy
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --use_audit_gan --gamma 1.0 --n_epochs 50 --wandb --exp_name "MNIST_Gamma_1.0"
+    goto END
+)
+if /i "%choice%"=="9" (
+    echo Running MNIST - Standard FedAvg - NO Fed-AuditGAN...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset mnist --partition_mode iid --n_epochs 50 --exp_name "MNIST_FedAvg_Baseline"
+    goto END
+)
+if /i "%choice%"=="C" (
+    echo Running CIFAR-10 - Fed-AuditGAN - gamma=0.5 balanced...
+    "%PYTHON_PATH%" fed_audit_gan.py --dataset cifar10 --partition_mode iid --use_audit_gan --gamma 0.5 --n_epochs 60 --wandb --exp_name "CIFAR10_Gamma_0.5"
     goto END
 )
 if /i "%choice%"=="Q" (

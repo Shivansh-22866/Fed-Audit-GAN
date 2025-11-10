@@ -425,10 +425,17 @@ def main():
             
             global_accuracy = correct / total if total > 0 else 0.0
             
-            # Use FairnessContributionScorer to compute weights
+            # Use FairnessContributionScorer to compute weights with gamma-based weighting
+            alpha = 1.0 - args.gamma  # Accuracy weight
+            beta = args.gamma          # Fairness weight
+            
+            logger.info(f"Computing contribution scores with gamma={args.gamma:.2f}")
+            logger.info(f"  → Accuracy weight (alpha): {alpha:.2f}")
+            logger.info(f"  → Fairness weight (beta):  {beta:.2f}")
+            
             scorer = FairnessContributionScorer(
-                alpha=1.0 - args.gamma,  # accuracy weight
-                beta=args.gamma  # fairness weight
+                alpha=alpha,
+                beta=beta
             )
             
             final_weights = scorer.compute_combined_scores(
@@ -437,6 +444,12 @@ def main():
                 client_fairness_scores=client_fairness_metrics,
                 global_fairness_score=fairness_metrics
             )
+            
+            logger.info(f"✓ Phase 3 complete. Client weights computed:")
+            logger.info(f"  → Weights: {[f'{w:.4f}' for w in final_weights]}")
+            logger.info(f"  → Max: {max(final_weights):.4f}, Min: {min(final_weights):.4f}")
+            logger.info(f"  → Std Dev: {np.std(final_weights):.4f}")
+            logger.info(f"  → Weight variance indicates fairness-driven reweighting")
             
             # Store statistics
             avg_fairness = np.mean([
